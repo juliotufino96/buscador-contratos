@@ -289,4 +289,4 @@ st.markdown(
     f"durante el periodo 2019-{año_actual}, para consulta pública. Disponibles en: "
     f"<a href='https://comprasmx.buengobierno.gob.mx/datos-abiertos' target='_blank'>https://comprasmx.buengobierno.gob.mx/datos-abiertos</a></p>",
     unsafe_allow_html=True
-)[cite: 2]
+)
