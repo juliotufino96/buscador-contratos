@@ -105,7 +105,7 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     return end_row, total_columnas
 
 # ================= INTERFAZ WEB STREAMLIT =================
-st.title("🏢 Plataforma de Consulta de Contratos")
+st.title("🏢 Consulta de Contratos")
 st.markdown("---")
 
 # Variables globales en sesión para no perder datos al recargar botones
@@ -114,7 +114,7 @@ if 'df_maestro' not in st.session_state:
 
 # SECCIÓN 1: SINCRONIZAR DATOS
 st.subheader("1. Actualizar Datos desde la Nube")
-if st.button("Descargar e Integrar Archivos"):
+if st.button("Actualizar"):
     with st.spinner("Descargando archivos desde Google Drive y procesando..."):
         # Descargar carpeta pública
         url = f'https://drive.google.com/drive/folders/{FOLDER_ID}'
