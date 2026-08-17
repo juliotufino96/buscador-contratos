@@ -31,14 +31,12 @@ def limpiar_y_agrupar_proveedor(texto):
     if pd.isna(texto): return ""
     texto = str(texto).upper()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-    texto = re.sub(r'[.,-]', ' ', texto) # Cambia puntuación por espacios
+    texto = re.sub(r'[.,-]', ' ', texto) 
     texto = re.sub(r'\s+', ' ', texto).strip()
     
-    # Expresión regular robusta para remover cualquier sufijo legal con o sin espacios
     patron_legal = r'\b(S\s*A\s*DE\s*C\s*V|S\s*DE\s*R\s*L\s*DE\s*C\s*V|S\s*DE\s*R\s*L|S\s*A\s*P\s*I\s*DE\s*C\s*V|S\s*A\s*B\s*DE\s*C\s*V|S\s*A|S\s*C|R\s*L\s*DE\s*C\s*V|S\s*P\s*R\s*DE\s*R\s*L|A\s*C)\b'
     texto = re.sub(patron_legal, '', texto).strip()
     
-    # Limpia dobles espacios residuales
     return re.sub(r'\s+', ' ', texto).strip()
 
 def limpiar_institucion(texto):
@@ -191,7 +189,6 @@ if st.button("Actualizar"):
 
         if df_list:
             df_maestro = pd.concat(df_list, ignore_index=True).reindex(columns=columnas_finales)
-            # DUALIDAD PARA BÚSQUEDA Y AGRUPACIÓN
             df_maestro['Proveedor_Limpio'] = df_maestro['Proveedor o contratista'].apply(normalizar_para_busqueda)
             df_maestro['Proveedor_Agrupado'] = df_maestro['Proveedor o contratista'].apply(limpiar_y_agrupar_proveedor)
             
@@ -215,11 +212,9 @@ elif termino:
         df = st.session_state.df_maestro
         termino_norm = normalizar_para_busqueda(termino)
         
-        # Filtramos coincidencias usando el nombre limpio (sin comas ni acentos)
         mask = df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
         df_coincidencias = df[mask]
         
-        # Lista de opciones AGRUPADAS (sin SA de CV)
         proveedores_unicos = df_coincidencias['Proveedor_Agrupado'].dropna().unique()
 
         if len(proveedores_unicos) == 0:
@@ -227,7 +222,6 @@ elif termino:
         else:
             st.success(f"✅ Se encontraron opciones similares. Puedes seleccionar UNA o VARIAS para unificarlas:")
             
-            # MULTISELECT: Permite fusionar "TRANSPORTE" y "TRANSPORTES" si el usuario lo desea
             proveedores_seleccionados = st.multiselect(
                 "Proveedores encontrados (Selecciona para generar Excel):",
                 sorted(proveedores_unicos)
@@ -235,14 +229,17 @@ elif termino:
 
             if proveedores_seleccionados:
                 with st.spinner(f"Integrando datos y preparando Excel..."):
-                    # Filtramos solo los proveedores que el usuario eligió palomear
+                    # Filtramos los datos reales según lo que el usuario seleccionó
                     df_exportar = df_coincidencias[df_coincidencias['Proveedor_Agrupado'].isin(proveedores_seleccionados)].copy()
                     
-                    # Definimos el nombre maestro que llevará el Excel
-                    nombre_base = proveedores_seleccionados[0]
-                    nombre_titulo_reporte = nombre_base if len(proveedores_seleccionados) == 1 else f"{nombre_base} (Y OTROS)"
+                    # === TRUCO DEL DISFRAZ (mode) ===
+                    # Encontramos la razón social original que más se repite en esta selección
+                    proveedor_estandar = df_exportar['Proveedor o contratista'].mode()[0]
                     
-                    df_exportar['Proveedor o contratista'] = nombre_titulo_reporte
+                    # Sobreescribimos la columna para que la hoja 'Detalle Contratos' quede limpia y uniforme
+                    df_exportar['Proveedor o contratista'] = proveedor_estandar
+                    # ================================
+                    
                     df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
                     df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
                     df_exportar['Año'] = df_exportar['Nombre del archivo'].astype(str).str.extract(r'(\d{4})').fillna('Sin Año')
@@ -269,7 +266,8 @@ elif termino:
                             ws_base.cell(row=r, column=idx_mill).number_format = '"$"#,##0.00'
 
                         ws_dinamica = writer.book.create_sheet('Resumen')
-                        end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, nombre_titulo_reporte, 2)
+                        # Mandamos el 'proveedor_estandar' para el título de la celda A2
+                        end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_estandar, 2)
                         ws_dinamica.column_dimensions['A'].width = 18 
                         ws_dinamica.column_dimensions['B'].width = 18 
                         ws_dinamica.column_dimensions['C'].width = 45 
@@ -278,8 +276,8 @@ elif termino:
                         
                         writer.book.move_sheet("Resumen", offset=-1)
                 
-                # Archivo final dinámico según cuántos se eligieron
-                nombre_archivo = f"Contratos_{re.sub(r'[\\/*?:<>|]', '', nombre_titulo_reporte)}.xlsx"
+                # Nombramos el archivo usando el proveedor estándar
+                nombre_archivo = f"Contratos_{re.sub(r'[\\/*?:<>|]', '', proveedor_estandar)}.xlsx"
                 
                 st.download_button(
                     label=f"⬇️ Descargar Reporte Consolidado",
