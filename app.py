@@ -85,7 +85,7 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
 
     columnas_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
     num_rows = len(pt_count)
-    total_columnas = 3 + len(columnas_periodos) * 2  # Actualizado para 3 columnas estáticas
+    total_columnas = 3 + len(columnas_periodos) * 2
     row_titulo, row_super_header, row_sub_header = start_row, start_row + 1, start_row + 2
 
     # 1. Título General
@@ -207,28 +207,41 @@ st.markdown("---")
 
 # SECCIÓN 2: BUSCAR Y DESCARGAR EXCEL
 st.subheader("2. Buscar Proveedor y Generar Reporte")
-termino = st.text_input("Nombre del proveedor:", placeholder="Ej. LIVERPOOL")
+termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. LIVERPOOL")
 
-if st.button("Buscar Contratos"):
-    if st.session_state.df_maestro.empty:
-        st.warning("⚠️ Primero debes hacer clic en 'Actualizar'.")
-    elif not termino:
-        st.warning("⚠️ Ingresa el nombre de un proveedor.")
+if st.session_state.df_maestro.empty:
+    st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
+elif termino:
+    if len(termino) < 3:
+        st.info("ℹ️ Sigue escribiendo para iniciar la búsqueda...")
     else:
-        with st.spinner(f"Buscando '{termino}'..."):
-            df = st.session_state.df_maestro
-            termino_norm = normalizar_para_busqueda(termino)
-            df_filtrado = df[df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)].copy()
+        df = st.session_state.df_maestro
+        termino_norm = normalizar_para_busqueda(termino)
+        
+        # Filtrar coincidencias parciales usando regex=False (para buscar el texto tal cual)
+        mask = df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
+        df_coincidencias = df[mask]
+        
+        # Obtener los nombres exactos y únicos de los proveedores encontrados
+        proveedores_unicos = df_coincidencias['Proveedor o contratista'].dropna().unique()
 
-            if df_filtrado.empty:
-                st.error("❌ No se encontraron contratos para este proveedor.")
-            else:
-                st.success(f"✅ {len(df_filtrado)} contratos encontrados. Preparando Excel...")
+        if len(proveedores_unicos) == 0:
+            st.error("❌ No se encontraron contratos que coincidan con tu búsqueda.")
+        else:
+            st.success(f"✅ Se encontraron {len(proveedores_unicos)} proveedores distintos. Selecciona uno de la lista:")
+            
+            # Mostrar la lista desplegable con las opciones encontradas
+            proveedor_seleccionado = st.selectbox(
+                "Opciones encontradas:",
+                sorted(proveedores_unicos)
+            )
+
+            # Generar el Excel automáticamente al seleccionar una opción de la lista
+            with st.spinner(f"Preparando Excel para {proveedor_seleccionado}..."):
+                # Filtrar el dataframe SOLO para el proveedor exacto seleccionado
+                df_exportar = df_coincidencias[df_coincidencias['Proveedor o contratista'] == proveedor_seleccionado].copy()
                 
                 # Procesamiento de datos
-                df_exportar = df_filtrado.copy()
-                proveedor_estandar = df_exportar['Proveedor o contratista'].mode()[0]
-                df_exportar['Proveedor o contratista'] = proveedor_estandar
                 df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
                 df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
                 df_exportar['Año'] = df_exportar['Nombre del archivo'].astype(str).str.extract(r'(\d{4})').fillna('Sin Año')
@@ -261,23 +274,23 @@ if st.button("Buscar Contratos"):
 
                     # 2. Crear Hoja Resumen
                     ws_dinamica = writer.book.create_sheet('Resumen')
-                    end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_estandar, 2)
-                    ws_dinamica.column_dimensions['A'].width = 18 # Orden de gobierno
-                    ws_dinamica.column_dimensions['B'].width = 18 # Clave Ramo
-                    ws_dinamica.column_dimensions['C'].width = 45 # Institución
+                    end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_seleccionado, 2)
+                    ws_dinamica.column_dimensions['A'].width = 18 
+                    ws_dinamica.column_dimensions['B'].width = 18 
+                    ws_dinamica.column_dimensions['C'].width = 45 
                     for col in range(4, col_total + 1): 
                         ws_dinamica.column_dimensions[get_column_letter(col)].width = 24
                     
-                    # 3. Invertir el orden (Mover Resumen al principio)
+                    # 3. Invertir el orden
                     writer.book.move_sheet("Resumen", offset=-1)
-                
-                # Botón de Descarga
-                st.download_button(
-                    label=f"⬇️ Descargar Reporte: {proveedor_estandar}",
-                    data=output.getvalue(),
-                    file_name=f"Contratos_{re.sub(r'[\\/*?:<>|]', '', termino)}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            
+            # Botón de Descarga que aparece inmediatamente debajo
+            st.download_button(
+                label=f"⬇️ Descargar Reporte de: {proveedor_seleccionado}",
+                data=output.getvalue(),
+                file_name=f"Contratos_{re.sub(r'[\\/*?:<>|]', '', proveedor_seleccionado)}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # ================= DISCLAIMER =================
 año_actual = datetime.datetime.now().year
