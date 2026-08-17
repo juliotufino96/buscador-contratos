@@ -20,13 +20,28 @@ ruta_parquet = os.path.join(RUTA_BASE, "historico.parquet")
 
 # ================= FUNCIONES DE LIMPIEZA =================
 def normalizar_para_busqueda(texto):
+    """ Minimiza el texto para que la búsqueda inicial por coincidencias sea amplia """
     if pd.isna(texto): return ""
     texto = str(texto).lower()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
     return re.sub(r'[.,]', '', texto).strip()
 
+def limpiar_y_agrupar_proveedor(texto):
+    """ Remueve denominaciones sociales (S.A. de C.V.) para unificar razones sociales idénticas """
+    if pd.isna(texto): return ""
+    texto = str(texto).upper()
+    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
+    texto = re.sub(r'[.,-]', ' ', texto) # Cambia puntuación por espacios
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    
+    # Expresión regular robusta para remover cualquier sufijo legal con o sin espacios
+    patron_legal = r'\b(S\s*A\s*DE\s*C\s*V|S\s*DE\s*R\s*L\s*DE\s*C\s*V|S\s*DE\s*R\s*L|S\s*A\s*P\s*I\s*DE\s*C\s*V|S\s*A\s*B\s*DE\s*C\s*V|S\s*A|S\s*C|R\s*L\s*DE\s*C\s*V|S\s*P\s*R\s*DE\s*R\s*L|A\s*C)\b'
+    texto = re.sub(patron_legal, '', texto).strip()
+    
+    # Limpia dobles espacios residuales
+    return re.sub(r'\s+', ' ', texto).strip()
+
 def limpiar_institucion(texto):
-    """ Estandariza el nombre de la institución a mayúsculas, sin acentos ni signos de puntuación """
     if pd.isna(texto): return ""
     texto = str(texto).upper()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
@@ -43,38 +58,29 @@ def leer_csv_seguro(ruta):
     return None
 
 def create_pivot_with_subtotals(df, values_col, agg_func):
-    """ Crea una tabla pivote jerárquica con subtotales por Orden de Gobierno """
-    # 1. Datos base
     base = pd.pivot_table(df, values=values_col, index=['Orden de gobierno', 'Ramo_Sort', 'Clave Ramo', 'Institución'], columns=['Año'], aggfunc=agg_func, fill_value=0).reset_index()
-    base['Is_Subtotal'] = False
-    base['Is_Total'] = False
+    base['Is_Subtotal'], base['Is_Total'] = False, False
 
-    # 2. Subtotales por Orden de Gobierno
     sub = pd.pivot_table(df, values=values_col, index=['Orden de gobierno'], columns=['Año'], aggfunc=agg_func, fill_value=0).reset_index()
-    sub['Ramo_Sort'] = 99999  # Forzar al final del grupo
+    sub['Ramo_Sort'] = 99999
     sub['Clave Ramo'] = 'Total ' + sub['Orden de gobierno']
     sub['Institución'] = ''
-    sub['Is_Subtotal'] = True
-    sub['Is_Total'] = False
+    sub['Is_Subtotal'], sub['Is_Total'] = True, False
 
-    # 3. Total General
     tot = pd.pivot_table(df, values=values_col, index=lambda x: 'Total General', columns=['Año'], aggfunc=agg_func, fill_value=0).reset_index()
     tot.rename(columns={'index': 'Orden de gobierno'}, inplace=True)
     tot['Orden de gobierno'] = 'Total General'
-    tot['Ramo_Sort'] = 999999 # Forzar hasta el fondo
+    tot['Ramo_Sort'] = 999999 
     tot['Clave Ramo'] = ''
     tot['Institución'] = ''
-    tot['Is_Subtotal'] = False
-    tot['Is_Total'] = True
+    tot['Is_Subtotal'], tot['Is_Total'] = False, True
 
-    # Integrar y ordenar
     res = pd.concat([base, sub, tot], ignore_index=True).fillna(0)
     res['Orden_Sort'] = res['Orden de gobierno'].apply(lambda x: 'ZZZZ' if x == 'Total General' else x)
     res.sort_values(by=['Orden_Sort', 'Ramo_Sort', 'Clave Ramo', 'Institución'], inplace=True)
     res.drop(columns=['Orden_Sort'], inplace=True)
     return res
 
-# Función para formatear el Excel 
 def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor, start_row=2):
     guinda_fill = PatternFill(start_color='9B2247', end_color='9B2247', fill_type='solid')
     verde_fill = PatternFill(start_color='1E5B4F', end_color='1E5B4F', fill_type='solid')
@@ -84,18 +90,15 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     border_thin = Side(style='thin')
 
     columnas_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
-    num_rows = len(pt_count)
-    total_columnas = 3 + len(columnas_periodos) * 2
+    num_rows, total_columnas = len(pt_count), 3 + len(columnas_periodos) * 2
     row_titulo, row_super_header, row_sub_header = start_row, start_row + 1, start_row + 2
 
-    # 1. Título General
     ws.cell(row=row_titulo, column=1, value=f"{nombre_proveedor}")
     ws.merge_cells(start_row=row_titulo, start_column=1, end_row=row_titulo, end_column=total_columnas)
     for c in range(1, total_columnas + 1):
         cell = ws.cell(row=row_titulo, column=c)
         cell.fill, cell.font, cell.alignment = guinda_fill, white_font, align_center
 
-    # 2. Encabezados de Columnas Fijas
     for c_idx, nombre_col in enumerate(["Orden de gobierno", "Clave Ramo", "Institución"], 1):
         ws.cell(row=row_super_header, column=c_idx, value=nombre_col)
         ws.merge_cells(start_row=row_super_header, start_column=c_idx, end_row=row_sub_header, end_column=c_idx)
@@ -103,7 +106,6 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
             cell = ws.cell(row=r_idx, column=c_idx)
             cell.fill, cell.font, cell.alignment = verde_fill, white_font, align_center
 
-    # 3. Encabezados de Periodos
     col_actual = 4
     for periodo in columnas_periodos:
         ws.cell(row=row_super_header, column=col_actual, value=periodo)
@@ -116,20 +118,16 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
             sc.fill, sc.font, sc.alignment = guinda_fill, white_font, align_center
         col_actual += 2
 
-    # 4. Datos
     data_start_row = row_sub_header + 1
     for i in range(num_rows):
         r_idx = data_start_row + i
         row_count, row_sum = pt_count.iloc[i], pt_sum.iloc[i]
         
-        es_total = row_count.get('Is_Total', False)
-        es_subtotal = row_count.get('Is_Subtotal', False)
-
+        es_total, es_subtotal = row_count.get('Is_Total', False), row_count.get('Is_Subtotal', False)
         c_ord = ws.cell(row=r_idx, column=1, value=row_count['Orden de gobierno'])
         c_ramo = ws.cell(row=r_idx, column=2, value=row_count['Clave Ramo'])
         c_inst = ws.cell(row=r_idx, column=3, value=row_count['Institución'])
 
-        # Colorear fila completa de guinda si es un Subtotal o Total General
         fill_color = guinda_fill if (es_total or es_subtotal) else verde_fill
         for c in [c_ord, c_ramo, c_inst]: c.fill, c.font = fill_color, white_font
 
@@ -142,7 +140,6 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
                 for c in [c_cnt, c_mnt]: c.fill, c.font = fill_color, white_font
             col_data += 2
 
-    # 5. Bordes
     end_row = data_start_row + num_rows - 1
     for r in range(start_row, end_row + 1):
         for c in range(1, total_columnas + 1):
@@ -154,10 +151,8 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
                 b = border_thin
                 row_current = pt_count.iloc[r - data_start_row]
                 row_next = pt_count.iloc[r - data_start_row + 1]
-                # Borde grueso para delimitar saltos de agrupaciones
                 if row_current['Orden de gobierno'] != row_next['Orden de gobierno'] or row_current.get('Is_Subtotal'):
                     b = border_thick
-
             cell.border = Border(top=t, bottom=b, left=border_thick if c == 1 else border_thin, right=border_thick if c == total_columnas else border_thin)
     return end_row, total_columnas
 
@@ -184,8 +179,7 @@ if st.button("Actualizar"):
         ]
         
         df_list = []
-        if os.path.exists(ruta_parquet):
-            df_list.append(pd.read_parquet(ruta_parquet))
+        if os.path.exists(ruta_parquet): df_list.append(pd.read_parquet(ruta_parquet))
             
         archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
         for csv in archivos_csv:
@@ -197,7 +191,10 @@ if st.button("Actualizar"):
 
         if df_list:
             df_maestro = pd.concat(df_list, ignore_index=True).reindex(columns=columnas_finales)
+            # DUALIDAD PARA BÚSQUEDA Y AGRUPACIÓN
             df_maestro['Proveedor_Limpio'] = df_maestro['Proveedor o contratista'].apply(normalizar_para_busqueda)
+            df_maestro['Proveedor_Agrupado'] = df_maestro['Proveedor o contratista'].apply(limpiar_y_agrupar_proveedor)
+            
             st.session_state.df_maestro = df_maestro
             st.success(f"¡Base de datos lista! {len(df_maestro):,} registros cargados.")
         else:
@@ -207,7 +204,7 @@ st.markdown("---")
 
 # SECCIÓN 2: BUSCAR Y DESCARGAR EXCEL
 st.subheader("2. Buscar Proveedor y Generar Reporte")
-termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. LIVERPOOL")
+termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. MYM")
 
 if st.session_state.df_maestro.empty:
     st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
@@ -218,79 +215,78 @@ elif termino:
         df = st.session_state.df_maestro
         termino_norm = normalizar_para_busqueda(termino)
         
-        # Filtrar coincidencias parciales usando regex=False (para buscar el texto tal cual)
+        # Filtramos coincidencias usando el nombre limpio (sin comas ni acentos)
         mask = df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
         df_coincidencias = df[mask]
         
-        # Obtener los nombres exactos y únicos de los proveedores encontrados
-        proveedores_unicos = df_coincidencias['Proveedor o contratista'].dropna().unique()
+        # Lista de opciones AGRUPADAS (sin SA de CV)
+        proveedores_unicos = df_coincidencias['Proveedor_Agrupado'].dropna().unique()
 
         if len(proveedores_unicos) == 0:
             st.error("❌ No se encontraron contratos que coincidan con tu búsqueda.")
         else:
-            st.success(f"✅ Se encontraron {len(proveedores_unicos)} proveedores distintos. Selecciona uno de la lista:")
+            st.success(f"✅ Se encontraron opciones similares. Puedes seleccionar UNA o VARIAS para unificarlas:")
             
-            # Mostrar la lista desplegable con las opciones encontradas
-            proveedor_seleccionado = st.selectbox(
-                "Opciones encontradas:",
+            # MULTISELECT: Permite fusionar "TRANSPORTE" y "TRANSPORTES" si el usuario lo desea
+            proveedores_seleccionados = st.multiselect(
+                "Proveedores encontrados (Selecciona para generar Excel):",
                 sorted(proveedores_unicos)
             )
 
-            # Generar el Excel automáticamente al seleccionar una opción de la lista
-            with st.spinner(f"Preparando Excel para {proveedor_seleccionado}..."):
-                # Filtrar el dataframe SOLO para el proveedor exacto seleccionado
-                df_exportar = df_coincidencias[df_coincidencias['Proveedor o contratista'] == proveedor_seleccionado].copy()
-                
-                # Procesamiento de datos
-                df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
-                df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
-                df_exportar['Año'] = df_exportar['Nombre del archivo'].astype(str).str.extract(r'(\d{4})').fillna('Sin Año')
-                
-                # Limpieza de Institución e imputación de Orden de Gobierno
-                df_exportar['Institución'] = df_exportar['Institución'].apply(limpiar_institucion)
-                df_exportar['Orden de gobierno'] = df_exportar['Orden de gobierno'].fillna('No especificado')
-                df_exportar['Clave Ramo'] = df_exportar['Clave Ramo'].fillna('Vacío')
-                df_exportar['Ramo_Sort'] = df_exportar['Clave Ramo'].apply(lambda x: float(x) if str(x).replace('.','',1).isdigit() else 9999)
-                df_exportar['Cuenta'] = 1
-
-                # Tablas dinámicas jerarquizadas
-                pt_count = create_pivot_with_subtotals(df_exportar, 'Cuenta', 'sum')
-                pt_sum = create_pivot_with_subtotals(df_exportar, 'Importe (en millones)', 'sum')
-
-                # Columnas sobrantes a eliminar antes del volcado final
-                for col in ['Proveedor_Limpio', 'Ramo_Sort', 'Cuenta']: 
-                    df_exportar.drop(columns=[col], errors='ignore', inplace=True)
-
-                # Generar el Excel en Memoria
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    # 1. Crear Hoja de Detalle
-                    df_exportar.to_excel(writer, sheet_name='Detalle Contratos', index=False)
-                    ws_base = writer.sheets['Detalle Contratos']
-                    idx_imp, idx_mill = df_exportar.columns.get_loc("Importe") + 1, df_exportar.columns.get_loc("Importe (en millones)") + 1
-                    for r in range(2, len(df_exportar) + 2):
-                        ws_base.cell(row=r, column=idx_imp).number_format = '"$"#,##0.00'
-                        ws_base.cell(row=r, column=idx_mill).number_format = '"$"#,##0.00'
-
-                    # 2. Crear Hoja Resumen
-                    ws_dinamica = writer.book.create_sheet('Resumen')
-                    end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_seleccionado, 2)
-                    ws_dinamica.column_dimensions['A'].width = 18 
-                    ws_dinamica.column_dimensions['B'].width = 18 
-                    ws_dinamica.column_dimensions['C'].width = 45 
-                    for col in range(4, col_total + 1): 
-                        ws_dinamica.column_dimensions[get_column_letter(col)].width = 24
+            if proveedores_seleccionados:
+                with st.spinner(f"Integrando datos y preparando Excel..."):
+                    # Filtramos solo los proveedores que el usuario eligió palomear
+                    df_exportar = df_coincidencias[df_coincidencias['Proveedor_Agrupado'].isin(proveedores_seleccionados)].copy()
                     
-                    # 3. Invertir el orden
-                    writer.book.move_sheet("Resumen", offset=-1)
-            
-            # Botón de Descarga que aparece inmediatamente debajo
-            st.download_button(
-                label=f"⬇️ Descargar Reporte de: {proveedor_seleccionado}",
-                data=output.getvalue(),
-                file_name=f"Contratos_{re.sub(r'[\\/*?:<>|]', '', proveedor_seleccionado)}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                    # Definimos el nombre maestro que llevará el Excel
+                    nombre_base = proveedores_seleccionados[0]
+                    nombre_titulo_reporte = nombre_base if len(proveedores_seleccionados) == 1 else f"{nombre_base} (Y OTROS)"
+                    
+                    df_exportar['Proveedor o contratista'] = nombre_titulo_reporte
+                    df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
+                    df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
+                    df_exportar['Año'] = df_exportar['Nombre del archivo'].astype(str).str.extract(r'(\d{4})').fillna('Sin Año')
+                    
+                    df_exportar['Institución'] = df_exportar['Institución'].apply(limpiar_institucion)
+                    df_exportar['Orden de gobierno'] = df_exportar['Orden de gobierno'].fillna('No especificado')
+                    df_exportar['Clave Ramo'] = df_exportar['Clave Ramo'].fillna('Vacío')
+                    df_exportar['Ramo_Sort'] = df_exportar['Clave Ramo'].apply(lambda x: float(x) if str(x).replace('.','',1).isdigit() else 9999)
+                    df_exportar['Cuenta'] = 1
+
+                    pt_count = create_pivot_with_subtotals(df_exportar, 'Cuenta', 'sum')
+                    pt_sum = create_pivot_with_subtotals(df_exportar, 'Importe (en millones)', 'sum')
+
+                    for col in ['Proveedor_Limpio', 'Proveedor_Agrupado', 'Ramo_Sort', 'Cuenta']: 
+                        df_exportar.drop(columns=[col], errors='ignore', inplace=True)
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df_exportar.to_excel(writer, sheet_name='Detalle Contratos', index=False)
+                        ws_base = writer.sheets['Detalle Contratos']
+                        idx_imp, idx_mill = df_exportar.columns.get_loc("Importe") + 1, df_exportar.columns.get_loc("Importe (en millones)") + 1
+                        for r in range(2, len(df_exportar) + 2):
+                            ws_base.cell(row=r, column=idx_imp).number_format = '"$"#,##0.00'
+                            ws_base.cell(row=r, column=idx_mill).number_format = '"$"#,##0.00'
+
+                        ws_dinamica = writer.book.create_sheet('Resumen')
+                        end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, nombre_titulo_reporte, 2)
+                        ws_dinamica.column_dimensions['A'].width = 18 
+                        ws_dinamica.column_dimensions['B'].width = 18 
+                        ws_dinamica.column_dimensions['C'].width = 45 
+                        for col in range(4, col_total + 1): 
+                            ws_dinamica.column_dimensions[get_column_letter(col)].width = 24
+                        
+                        writer.book.move_sheet("Resumen", offset=-1)
+                
+                # Archivo final dinámico según cuántos se eligieron
+                nombre_archivo = f"Contratos_{re.sub(r'[\\/*?:<>|]', '', nombre_titulo_reporte)}.xlsx"
+                
+                st.download_button(
+                    label=f"⬇️ Descargar Reporte Consolidado",
+                    data=output.getvalue(),
+                    file_name=nombre_archivo,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 # ================= DISCLAIMER =================
 año_actual = datetime.datetime.now().year
