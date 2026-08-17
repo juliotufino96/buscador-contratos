@@ -201,7 +201,7 @@ st.markdown("---")
 
 # SECCIÓN 2: BUSCAR Y DESCARGAR EXCEL
 st.subheader("2. Buscar Proveedor y Generar Reporte")
-termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. MYM")
+termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. UNIVERSAL EXPORTS")
 
 if st.session_state.df_maestro.empty:
     st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
