@@ -160,14 +160,15 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     return end_row, total_columnas
 
 # ================= INTERFAZ WEB STREAMLIT =================
-# NUEVO: Alineamos la imagen junto al título usando columnas
-col_img, col_tit = st.columns([1, 8])
+# 1. Cambiamos la proporción de las columnas (antes [1, 8], ahora [1.5, 7]) para darle más espacio al logo
+col_img, col_tit = st.columns([1.5, 7])
 
 with col_img:
     try:
-        st.image("logo.jpg", width=150) # Ajusta este número si quieres el logo más grande o chico
+        # 2. Aumentamos el tamaño de 70 a 150 (puedes subirlo a 200 o más si lo necesitas)
+        st.image("logo.jpg", width=150) 
     except FileNotFoundError:
-        st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) # Respaldo si no encuentra la imagen
+        st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) 
 
 with col_tit:
     st.title("Consulta de Contratos")
