@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 # ================= CONFIGURACIÓN =================
 # Intentamos cargar la imagen local para el ícono de la pestaña
 try:
-    icono = Image.open("logo.png") # Asegúrate de que se llame así en tu GitHub
+    icono = Image.open("logo.jpg") # Asegúrate de que se llame así en tu GitHub
 except FileNotFoundError:
     icono = "🏢" # Respaldo por si la imagen no se encuentra
 
