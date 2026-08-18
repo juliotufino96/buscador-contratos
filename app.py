@@ -7,11 +7,18 @@ import unicodedata
 import io
 import gdown
 import datetime
+from PIL import Image  # NUEVO: Librería para manejar imágenes
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
 # ================= CONFIGURACIÓN =================
-st.set_page_config(page_title="Buscador de Contratos", page_icon="🏢", layout="centered")
+# Intentamos cargar la imagen local para el ícono de la pestaña
+try:
+    icono = Image.open("logo.png") # Asegúrate de que se llame así en tu GitHub
+except FileNotFoundError:
+    icono = "🏢" # Respaldo por si la imagen no se encuentra
+
+st.set_page_config(page_title="Buscador de Contratos", page_icon=icono, layout="centered")
 
 # ID de tu carpeta pública de Drive
 FOLDER_ID = "1IenfFVfGPxVyEjBaK7M_1JtAKbBGaWlf"
@@ -20,14 +27,12 @@ ruta_parquet = os.path.join(RUTA_BASE, "historico.parquet")
 
 # ================= FUNCIONES DE LIMPIEZA =================
 def normalizar_para_busqueda(texto):
-    """ Minimiza el texto para que la búsqueda inicial por coincidencias sea amplia """
     if pd.isna(texto): return ""
     texto = str(texto).lower()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
     return re.sub(r'[.,]', '', texto).strip()
 
 def limpiar_y_agrupar_proveedor(texto):
-    """ Remueve denominaciones sociales (S.A. de C.V.) para unificar razones sociales idénticas """
     if pd.isna(texto): return ""
     texto = str(texto).upper()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
@@ -155,7 +160,18 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     return end_row, total_columnas
 
 # ================= INTERFAZ WEB STREAMLIT =================
-st.title("🏢 Consulta de Contratos")
+# NUEVO: Alineamos la imagen junto al título usando columnas
+col_img, col_tit = st.columns([1, 8])
+
+with col_img:
+    try:
+        st.image("logo.jpg", width=70) # Ajusta este número si quieres el logo más grande o chico
+    except FileNotFoundError:
+        st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) # Respaldo si no encuentra la imagen
+
+with col_tit:
+    st.title("Consulta de Contratos")
+
 st.markdown("---")
 
 if 'df_maestro' not in st.session_state:
@@ -201,7 +217,7 @@ st.markdown("---")
 
 # SECCIÓN 2: BUSCAR Y DESCARGAR EXCEL
 st.subheader("2. Buscar Proveedor y Generar Reporte")
-termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. UNIVERSAL EXPORTS")
+termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. MYM")
 
 if st.session_state.df_maestro.empty:
     st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
@@ -229,14 +245,10 @@ elif termino:
 
             if proveedores_seleccionados:
                 with st.spinner(f"Integrando datos y preparando Excel..."):
-                    # Filtramos los datos reales según lo que el usuario seleccionó
                     df_exportar = df_coincidencias[df_coincidencias['Proveedor_Agrupado'].isin(proveedores_seleccionados)].copy()
                     
                     # === TRUCO DEL DISFRAZ (mode) ===
-                    # Encontramos la razón social original que más se repite en esta selección
                     proveedor_estandar = df_exportar['Proveedor o contratista'].mode()[0]
-                    
-                    # Sobreescribimos la columna para que la hoja 'Detalle Contratos' quede limpia y uniforme
                     df_exportar['Proveedor o contratista'] = proveedor_estandar
                     # ================================
                     
@@ -266,7 +278,6 @@ elif termino:
                             ws_base.cell(row=r, column=idx_mill).number_format = '"$"#,##0.00'
 
                         ws_dinamica = writer.book.create_sheet('Resumen')
-                        # Mandamos el 'proveedor_estandar' para el título de la celda A2
                         end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_estandar, 2)
                         ws_dinamica.column_dimensions['A'].width = 18 
                         ws_dinamica.column_dimensions['B'].width = 18 
@@ -276,7 +287,6 @@ elif termino:
                         
                         writer.book.move_sheet("Resumen", offset=-1)
                 
-                # Nombramos el archivo usando el proveedor estándar
                 nombre_archivo = f"Contratos_{re.sub(r'[\\/*?:<>|]', '', proveedor_estandar)}.xlsx"
                 
                 st.download_button(
