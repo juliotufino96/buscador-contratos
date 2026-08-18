@@ -165,7 +165,7 @@ col_img, col_tit = st.columns([1, 8])
 
 with col_img:
     try:
-        st.image("logo.jpg", width=250) # Ajusta este número si quieres el logo más grande o chico
+        st.image("logo.jpg", width=150) # Ajusta este número si quieres el logo más grande o chico
     except FileNotFoundError:
         st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) # Respaldo si no encuentra la imagen
 
