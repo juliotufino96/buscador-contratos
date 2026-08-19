@@ -7,20 +7,18 @@ import unicodedata
 import io
 import gdown
 import datetime
-from PIL import Image  # NUEVO: Librería para manejar imágenes
+from PIL import Image  
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
 # ================= CONFIGURACIÓN =================
-# Intentamos cargar la imagen local para el ícono de la pestaña
 try:
-    icono = Image.open("logo.jpg") # Asegúrate de que se llame así en tu GitHub
+    icono = Image.open("logo.jpg") 
 except FileNotFoundError:
-    icono = "🏢" # Respaldo por si la imagen no se encuentra
+    icono = "🏢" 
 
 st.set_page_config(page_title="Buscador de Contratos", page_icon=icono, layout="centered")
 
-# ID de tu carpeta pública de Drive
 FOLDER_ID = "1IenfFVfGPxVyEjBaK7M_1JtAKbBGaWlf"
 RUTA_BASE = "Datos_Descargados"
 ruta_parquet = os.path.join(RUTA_BASE, "historico.parquet")
@@ -93,6 +91,10 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     border_thin = Side(style='thin')
 
     columnas_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
+    # Añadir columna de Total General si existe
+    if 'Total General' in pt_count.columns:
+        columnas_periodos.append('Total General')
+        
     num_rows, total_columnas = len(pt_count), 3 + len(columnas_periodos) * 2
     row_titulo, row_super_header, row_sub_header = start_row, start_row + 1, start_row + 2
 
@@ -116,7 +118,14 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
         for c in range(col_actual, col_actual + 2):
             cell = ws.cell(row=row_super_header, column=c)
             cell.fill, cell.font, cell.alignment = guinda_fill, white_font, align_center
-        for idx, sub_val in enumerate(["Número de procedimiento", "Importe (Millones)"]):
+            
+        # Diferenciar títulos para Total vs Años
+        if periodo == 'Total General':
+            sub_titulos = ["Total Número de contratos", "Total Importe (mdp)"]
+        else:
+            sub_titulos = ["Número de contratos", "Importe (mdp)"]
+            
+        for idx, sub_val in enumerate(sub_titulos):
             sc = ws.cell(row=row_sub_header, column=col_actual + idx, value=sub_val)
             sc.fill, sc.font, sc.alignment = guinda_fill, white_font, align_center
         col_actual += 2
@@ -160,12 +169,10 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     return end_row, total_columnas
 
 # ================= INTERFAZ WEB STREAMLIT =================
-# 1. Cambiamos la proporción de las columnas (antes [1, 8], ahora [1.5, 7]) para darle más espacio al logo
 col_img, col_tit = st.columns([1.5, 7])
 
 with col_img:
     try:
-        # 2. Aumentamos el tamaño de 70 a 150 (puedes subirlo a 200 o más si lo necesitas)
         st.image("logo.jpg", width=150) 
     except FileNotFoundError:
         st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) 
@@ -248,10 +255,8 @@ elif termino:
                 with st.spinner(f"Integrando datos y preparando Excel..."):
                     df_exportar = df_coincidencias[df_coincidencias['Proveedor_Agrupado'].isin(proveedores_seleccionados)].copy()
                     
-                    # === TRUCO DEL DISFRAZ (mode) ===
                     proveedor_estandar = df_exportar['Proveedor o contratista'].mode()[0]
                     df_exportar['Proveedor o contratista'] = proveedor_estandar
-                    # ================================
                     
                     df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
                     df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
@@ -265,6 +270,12 @@ elif termino:
 
                     pt_count = create_pivot_with_subtotals(df_exportar, 'Cuenta', 'sum')
                     pt_sum = create_pivot_with_subtotals(df_exportar, 'Importe (en millones)', 'sum')
+                    
+                    # === CALCULAR TOTALES POR FILA ===
+                    cols_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
+                    pt_count['Total General'] = pt_count[cols_periodos].sum(axis=1)
+                    pt_sum['Total General'] = pt_sum[cols_periodos].sum(axis=1)
+                    # ==================================
 
                     for col in ['Proveedor_Limpio', 'Proveedor_Agrupado', 'Ramo_Sort', 'Cuenta']: 
                         df_exportar.drop(columns=[col], errors='ignore', inplace=True)
@@ -280,11 +291,14 @@ elif termino:
 
                         ws_dinamica = writer.book.create_sheet('Resumen')
                         end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_estandar, 2)
-                        ws_dinamica.column_dimensions['A'].width = 18 
-                        ws_dinamica.column_dimensions['B'].width = 18 
+                        
+                        # === AJUSTE DE ANCHOS DE COLUMNA EXACTOS ===
+                        ws_dinamica.column_dimensions['A'].width = 9 
+                        ws_dinamica.column_dimensions['B'].width = 6.86 
                         ws_dinamica.column_dimensions['C'].width = 45 
                         for col in range(4, col_total + 1): 
-                            ws_dinamica.column_dimensions[get_column_letter(col)].width = 24
+                            ws_dinamica.column_dimensions[get_column_letter(col)].width = 10.71
+                        # ==========================================
                         
                         writer.book.move_sheet("Resumen", offset=-1)
                 
