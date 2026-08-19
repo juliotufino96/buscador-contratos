@@ -1,0 +1,21 @@
+name: Auto-Reboot Streamlit App
+
+on:
+  schedule:
+    # Se ejecuta todos los días a las 12:00 UTC (6:00 am CST)
+    - cron: '0 12 * * *' 
+  workflow_dispatch: 
+
+jobs:
+  reiniciar-app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v3
+
+      - name: Hacer un commit vacío y empujar
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git commit --allow-empty -m "🤖 Auto-reboot: Reinicio diario a las 6am"
+          git push
