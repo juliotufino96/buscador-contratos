@@ -159,6 +159,38 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
             cell.border = Border(top=t, bottom=b, left=border_thick if c == 1 else border_thin, right=border_thick if c == total_columnas else border_thin)
     return end_row, total_columnas
 
+# ================= CARGA DE DATOS COMPARTIDA (CACHÉ) =================
+@st.cache_data(show_spinner=False)
+def cargar_y_procesar_datos():
+    url = f'https://drive.google.com/drive/folders/{FOLDER_ID}'
+    gdown.download_folder(url, output=RUTA_BASE, quiet=True, use_cookies=False)
+    
+    columnas_finales = [
+        "Nombre del archivo", "Orden de gobierno", "Clave Ramo",
+        "Siglas de la Institución", "Institución", "Número de procedimiento",
+        "Núm. del contrato", "Fecha de inicio del contrato",
+        "Fecha de fin del contrato", "Importe",
+        "Proveedor o contratista", "Dirección del anuncio"
+    ]
+    
+    df_list = []
+    if os.path.exists(ruta_parquet): df_list.append(pd.read_parquet(ruta_parquet))
+        
+    archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
+    for csv in archivos_csv:
+        df_temp = leer_csv_seguro(csv)
+        if df_temp is not None:
+            df_temp = df_temp.rename(columns={'Importe DRC': 'Importe', 'Número del procedimiento': 'Número de procedimiento', 'Importe del contrato': 'Importe'})
+            df_temp['Nombre del archivo'] = os.path.basename(csv)
+            df_list.append(df_temp)
+
+    if df_list:
+        df_maestro = pd.concat(df_list, ignore_index=True).reindex(columns=columnas_finales)
+        df_maestro['Proveedor_Limpio'] = df_maestro['Proveedor o contratista'].apply(normalizar_para_busqueda)
+        df_maestro['Proveedor_Agrupado'] = df_maestro['Proveedor o contratista'].apply(limpiar_y_agrupar_proveedor)
+        return df_maestro
+    return pd.DataFrame()
+
 # ================= INTERFAZ WEB STREAMLIT =================
 # 1. Cambiamos la proporción de las columnas (antes [1, 8], ahora [1.5, 7]) para darle más espacio al logo
 col_img, col_tit = st.columns([1.5, 7])
@@ -171,48 +203,26 @@ with col_img:
         st.markdown("<h1>🏢</h1>", unsafe_allow_html=True) 
 
 with col_tit:
+    st.markdown("<br>", unsafe_allow_html=True) # Baja un poco el título
     st.title("Consulta de Contratos")
 
 st.markdown("---")
 
-if 'df_maestro' not in st.session_state:
-    st.session_state.df_maestro = pd.DataFrame()
-
 # SECCIÓN 1: SINCRONIZAR DATOS
 st.subheader("1. Actualizar Datos desde la Nube")
-if st.button("Actualizar"):
-    with st.spinner("Descargando archivos desde Google Drive y procesando..."):
-        url = f'https://drive.google.com/drive/folders/{FOLDER_ID}'
-        gdown.download_folder(url, output=RUTA_BASE, quiet=True, use_cookies=False)
-        
-        columnas_finales = [
-            "Nombre del archivo", "Orden de gobierno", "Clave Ramo",
-            "Siglas de la Institución", "Institución", "Número de procedimiento",
-            "Núm. del contrato", "Fecha de inicio del contrato",
-            "Fecha de fin del contrato", "Importe",
-            "Proveedor o contratista", "Dirección del anuncio"
-        ]
-        
-        df_list = []
-        if os.path.exists(ruta_parquet): df_list.append(pd.read_parquet(ruta_parquet))
-            
-        archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
-        for csv in archivos_csv:
-            df_temp = leer_csv_seguro(csv)
-            if df_temp is not None:
-                df_temp = df_temp.rename(columns={'Importe DRC': 'Importe', 'Número del procedimiento': 'Número de procedimiento', 'Importe del contrato': 'Importe'})
-                df_temp['Nombre del archivo'] = os.path.basename(csv)
-                df_list.append(df_temp)
 
-        if df_list:
-            df_maestro = pd.concat(df_list, ignore_index=True).reindex(columns=columnas_finales)
-            df_maestro['Proveedor_Limpio'] = df_maestro['Proveedor o contratista'].apply(normalizar_para_busqueda)
-            df_maestro['Proveedor_Agrupado'] = df_maestro['Proveedor o contratista'].apply(limpiar_y_agrupar_proveedor)
-            
-            st.session_state.df_maestro = df_maestro
-            st.success(f"¡Base de datos lista! {len(df_maestro):,} registros cargados.")
+if st.button("Actualizar"):
+    st.cache_data.clear() # Limpia la memoria caché antes de actualizar
+    with st.spinner("Descargando archivos desde Google Drive y procesando..."):
+        df_maestro = cargar_y_procesar_datos()
+        if not df_maestro.empty:
+            st.success(f"¡Base de datos lista! {len(df_maestro):,} registros cargados en memoria compartida.")
         else:
             st.error("No se encontraron archivos en la carpeta.")
+else:
+    # Carga la base de datos de manera silenciosa si ya existe en caché
+    with st.spinner("Cargando datos..."):
+        df_maestro = cargar_y_procesar_datos()
 
 st.markdown("---")
 
@@ -220,17 +230,16 @@ st.markdown("---")
 st.subheader("2. Buscar Proveedor y Generar Reporte")
 termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. UNIVERSAL EXPORTS")
 
-if st.session_state.df_maestro.empty:
+if df_maestro.empty:
     st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
 elif termino:
     if len(termino) < 3:
         st.info("ℹ️ Sigue escribiendo para iniciar la búsqueda...")
     else:
-        df = st.session_state.df_maestro
         termino_norm = normalizar_para_busqueda(termino)
         
-        mask = df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
-        df_coincidencias = df[mask]
+        mask = df_maestro['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
+        df_coincidencias = df_maestro[mask]
         
         proveedores_unicos = df_coincidencias['Proveedor_Agrupado'].dropna().unique()
 
