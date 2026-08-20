@@ -2,8 +2,7 @@ name: Auto-Reboot Streamlit App
 
 on:
   schedule:
-    # Se ejecuta todos los días a las 12:00 UTC (6:00 am CST)
-    - cron: '0 12 * * *' 
+    - cron: '0 0,12 * * *'  # Corre cada 12 horas (a la medianoche y a mediodía UTC)
   workflow_dispatch: 
 
 jobs:
