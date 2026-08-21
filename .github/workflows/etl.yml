@@ -1,0 +1,37 @@
+name: ETL Diario de Contratos
+
+on:
+  schedule:
+    # 10:15 AM CDMX (UTC-6) corresponde a las 16:15 UTC
+    - cron: '15 16 * * *'
+  workflow_dispatch: # Habilita un botón para ejecutarlo manualmente cuando quieras
+
+jobs:
+  procesar-datos:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Otorga permisos para subir el archivo actualizado
+      
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar entorno de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: |
+          pip install pandas pyarrow gdown openpyxl
+
+      - name: Ejecutar script de procesamiento (ETL)
+        run: python etl.py
+
+      - name: Guardar y subir datos procesados
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add datos_procesados.parquet
+          git commit -m "bot: Actualización automática de datos" || exit 0
+          git push
