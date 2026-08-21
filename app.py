@@ -1,17 +1,16 @@
 import streamlit as st
 import pandas as pd
+import duckdb
 import os
-import glob
 import re
 import unicodedata
 import io
-import gdown
 import datetime
 from PIL import Image  
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
-# ================= CONFIGURACIÓN =================
+# ================= CONFIGURACIÓN DE PÁGINA =================
 try:
     icono = Image.open("logo.jpg") 
 except FileNotFoundError:
@@ -19,44 +18,14 @@ except FileNotFoundError:
 
 st.set_page_config(page_title="Buscador de Contratos", page_icon=icono, layout="centered")
 
-FOLDER_ID = "1IenfFVfGPxVyEjBaK7M_1JtAKbBGaWlf"
-RUTA_BASE = "Datos_Descargados"
-ruta_parquet = os.path.join(RUTA_BASE, "historico.parquet")
+ARCHIVO_PARQUET = "datos_procesados.parquet"
 
-# ================= FUNCIONES DE LIMPIEZA =================
+# ================= FUNCIONES DE LIMPIEZA Y FORMATO =================
 def normalizar_para_busqueda(texto):
     if pd.isna(texto): return ""
     texto = str(texto).lower()
     texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
     return re.sub(r'[.,]', '', texto).strip()
-
-def limpiar_y_agrupar_proveedor(texto):
-    if pd.isna(texto): return ""
-    texto = str(texto).upper()
-    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-    texto = re.sub(r'[.,-]', ' ', texto) 
-    texto = re.sub(r'\s+', ' ', texto).strip()
-    
-    patron_legal = r'\b(S\s*A\s*DE\s*C\s*V|S\s*DE\s*R\s*L\s*DE\s*C\s*V|S\s*DE\s*R\s*L|S\s*A\s*P\s*I\s*DE\s*C\s*V|S\s*A\s*B\s*DE\s*C\s*V|S\s*A|S\s*C|R\s*L\s*DE\s*C\s*V|S\s*P\s*R\s*DE\s*R\s*L|A\s*C)\b'
-    texto = re.sub(patron_legal, '', texto).strip()
-    
-    return re.sub(r'\s+', ' ', texto).strip()
-
-def limpiar_institucion(texto):
-    if pd.isna(texto): return ""
-    texto = str(texto).upper()
-    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-    texto = re.sub(r'[.,]', '', texto)
-    return texto.strip()
-
-def leer_csv_seguro(ruta):
-    codificaciones = ['utf-8-sig', 'latin-1', 'windows-1252']
-    for cod in codificaciones:
-        try:
-            return pd.read_csv(ruta, encoding=cod, dtype=str)
-        except Exception:
-            continue
-    return None
 
 def create_pivot_with_subtotals(df, values_col, agg_func):
     base = pd.pivot_table(df, values=values_col, index=['Orden de gobierno', 'Ramo_Sort', 'Clave Ramo', 'Institución'], columns=['Año'], aggfunc=agg_func, fill_value=0).reset_index()
@@ -91,7 +60,6 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
     border_thin = Side(style='thin')
 
     columnas_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
-    # Añadir columna de Total General si existe
     if 'Total General' in pt_count.columns:
         columnas_periodos.append('Total General')
         
@@ -119,11 +87,7 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
             cell = ws.cell(row=row_super_header, column=c)
             cell.fill, cell.font, cell.alignment = guinda_fill, white_font, align_center
             
-        # Diferenciar títulos para Total vs Años
-        if periodo == 'Total General':
-            sub_titulos = ["Total Número de contratos", "Total Importe (mdp)"]
-        else:
-            sub_titulos = ["Número de contratos", "Importe (mdp)"]
+        sub_titulos = ["Total Número de contratos", "Total Importe (mdp)"] if periodo == 'Total General' else ["Número de contratos", "Importe (mdp)"]
             
         for idx, sub_val in enumerate(sub_titulos):
             sc = ws.cell(row=row_sub_header, column=col_actual + idx, value=sub_val)
@@ -168,7 +132,7 @@ def formatear_y_escribir_tabla_integrada(ws, pt_count, pt_sum, nombre_proveedor,
             cell.border = Border(top=t, bottom=b, left=border_thick if c == 1 else border_thin, right=border_thick if c == total_columnas else border_thin)
     return end_row, total_columnas
 
-# ================= INTERFAZ WEB STREAMLIT =================
+# ================= INTERFAZ STREAMLIT =================
 col_img, col_tit = st.columns([1.5, 7])
 
 with col_img:
@@ -182,69 +146,36 @@ with col_tit:
 
 st.markdown("---")
 
-if 'df_maestro' not in st.session_state:
-    st.session_state.df_maestro = pd.DataFrame()
+if not os.path.exists(ARCHIVO_PARQUET):
+    st.error(f"⚠️ No se encontró la base de datos local `{ARCHIVO_PARQUET}`. Espera a que la GitHub Action finalice su primera ejecución.")
+    st.stop()
 
-# SECCIÓN 1: SINCRONIZAR DATOS
-st.subheader("1. Actualizar Datos desde la Nube")
-if st.button("Actualizar"):
-    with st.spinner("Descargando archivos desde Google Drive y procesando..."):
-        url = f'https://drive.google.com/drive/folders/{FOLDER_ID}'
-        gdown.download_folder(url, output=RUTA_BASE, quiet=True, use_cookies=False)
-        
-        columnas_finales = [
-            "Nombre del archivo", "Orden de gobierno", "Clave Ramo",
-            "Siglas de la Institución", "Institución", "Número de procedimiento",
-            "Núm. del contrato", "Fecha de inicio del contrato",
-            "Fecha de fin del contrato", "Importe",
-            "Proveedor o contratista", "Dirección del anuncio"
-        ]
-        
-        df_list = []
-        if os.path.exists(ruta_parquet): df_list.append(pd.read_parquet(ruta_parquet))
-            
-        archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
-        for csv in archivos_csv:
-            df_temp = leer_csv_seguro(csv)
-            if df_temp is not None:
-                df_temp = df_temp.rename(columns={'Importe DRC': 'Importe', 'Número del procedimiento': 'Número de procedimiento', 'Importe del contrato': 'Importe'})
-                df_temp['Nombre del archivo'] = os.path.basename(csv)
-                df_list.append(df_temp)
-
-        if df_list:
-            df_maestro = pd.concat(df_list, ignore_index=True).reindex(columns=columnas_finales)
-            df_maestro['Proveedor_Limpio'] = df_maestro['Proveedor o contratista'].apply(normalizar_para_busqueda)
-            df_maestro['Proveedor_Agrupado'] = df_maestro['Proveedor o contratista'].apply(limpiar_y_agrupar_proveedor)
-            
-            st.session_state.df_maestro = df_maestro
-            st.success(f"¡Base de datos lista! {len(df_maestro):,} registros cargados.")
-        else:
-            st.error("No se encontraron archivos en la carpeta.")
-
-st.markdown("---")
-
-# SECCIÓN 2: BUSCAR Y DESCARGAR EXCEL
-st.subheader("2. Buscar Proveedor y Generar Reporte")
+# CONSULTA DE PROVEEDORES
+st.subheader("Buscar Proveedor y Generar Reporte")
 termino = st.text_input("Ingresa el nombre del proveedor (Mínimo 3 letras):", placeholder="Ej. UNIVERSAL EXPORTS")
 
-if st.session_state.df_maestro.empty:
-    st.warning("⚠️ Primero debes hacer clic en 'Actualizar' en la parte superior.")
-elif termino:
+if termino:
     if len(termino) < 3:
         st.info("ℹ️ Sigue escribiendo para iniciar la búsqueda...")
     else:
-        df = st.session_state.df_maestro
         termino_norm = normalizar_para_busqueda(termino)
         
-        mask = df['Proveedor_Limpio'].str.contains(termino_norm, regex=False, na=False)
-        df_coincidencias = df[mask]
+        # Consulta ultrarrápida a disco con DuckDB
+        con = duckdb.connect()
+        query_busqueda = f"""
+            SELECT DISTINCT Proveedor_Agrupado 
+            FROM '{ARCHIVO_PARQUET}' 
+            WHERE Proveedor_Limpio LIKE ?
+        """
+        coincidencias = con.execute(query_busqueda, [f"%{termino_norm}%"]).df()
+        con.close()
         
-        proveedores_unicos = df_coincidencias['Proveedor_Agrupado'].dropna().unique()
+        proveedores_unicos = coincidencias['Proveedor_Agrupado'].dropna().unique()
 
         if len(proveedores_unicos) == 0:
             st.error("❌ No se encontraron contratos que coincidan con tu búsqueda.")
         else:
-            st.success(f"✅ Se encontraron opciones similares. Puedes seleccionar UNA o VARIAS para unificarlas:")
+            st.success("✅ Se encontraron opciones similares. Puedes seleccionar UNA o VARIAS para unificarlas:")
             
             proveedores_seleccionados = st.multiselect(
                 "Proveedores encontrados (Selecciona para generar Excel):",
@@ -252,31 +183,35 @@ elif termino:
             )
 
             if proveedores_seleccionados:
-                with st.spinner(f"Integrando datos y preparando Excel..."):
-                    df_exportar = df_coincidencias[df_coincidencias['Proveedor_Agrupado'].isin(proveedores_seleccionados)].copy()
+                with st.spinner("Integrando datos y preparando Excel..."):
+                    # Extraer solo los datos correspondientes a los proveedores seleccionados
+                    con = duckdb.connect()
+                    placeholders = ', '.join(['?'] * len(proveedores_seleccionados))
+                    query_detalle = f"""
+                        SELECT * 
+                        FROM '{ARCHIVO_PARQUET}' 
+                        WHERE Proveedor_Agrupado IN ({placeholders})
+                    """
+                    df_exportar = con.execute(query_detalle, proveedores_seleccionados).df()
+                    con.close()
                     
                     proveedor_estandar = df_exportar['Proveedor o contratista'].mode()[0]
                     df_exportar['Proveedor o contratista'] = proveedor_estandar
                     
-                    df_exportar['Importe'] = pd.to_numeric(df_exportar['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
+                    # Preparación de datos para el reporte
                     df_exportar.insert(df_exportar.columns.get_loc('Importe') + 1, 'Importe (en millones)', df_exportar['Importe'] / 1000000.0)
-                    df_exportar['Año'] = df_exportar['Nombre del archivo'].astype(str).str.extract(r'(\d{4})').fillna('Sin Año')
-                    
-                    df_exportar['Institución'] = df_exportar['Institución'].apply(limpiar_institucion)
-                    df_exportar['Orden de gobierno'] = df_exportar['Orden de gobierno'].fillna('No especificado')
-                    df_exportar['Clave Ramo'] = df_exportar['Clave Ramo'].fillna('Vacío')
                     df_exportar['Ramo_Sort'] = df_exportar['Clave Ramo'].apply(lambda x: float(x) if str(x).replace('.','',1).isdigit() else 9999)
                     df_exportar['Cuenta'] = 1
 
                     pt_count = create_pivot_with_subtotals(df_exportar, 'Cuenta', 'sum')
                     pt_sum = create_pivot_with_subtotals(df_exportar, 'Importe (en millones)', 'sum')
                     
-                    # === CALCULAR TOTALES POR FILA ===
+                    # Totales por fila
                     cols_periodos = [c for c in pt_count.columns if str(c).isdigit() or str(c) == 'Sin Año']
                     pt_count['Total General'] = pt_count[cols_periodos].sum(axis=1)
                     pt_sum['Total General'] = pt_sum[cols_periodos].sum(axis=1)
-                    # ==================================
 
+                    # Limpieza de columnas auxiliares antes de la descarga
                     for col in ['Proveedor_Limpio', 'Proveedor_Agrupado', 'Ramo_Sort', 'Cuenta']: 
                         df_exportar.drop(columns=[col], errors='ignore', inplace=True)
 
@@ -292,26 +227,24 @@ elif termino:
                         ws_dinamica = writer.book.create_sheet('Resumen')
                         end_row, col_total = formatear_y_escribir_tabla_integrada(ws_dinamica, pt_count, pt_sum, proveedor_estandar, 2)
                         
-                        # === AJUSTE DE ANCHOS DE COLUMNA EXACTOS ===
                         ws_dinamica.column_dimensions['A'].width = 9 
                         ws_dinamica.column_dimensions['B'].width = 6.86 
                         ws_dinamica.column_dimensions['C'].width = 45 
                         for col in range(4, col_total + 1): 
                             ws_dinamica.column_dimensions[get_column_letter(col)].width = 10.71
-                        # ==========================================
                         
                         writer.book.move_sheet("Resumen", offset=-1)
                 
                 nombre_archivo = f"Contratos_{re.sub(r'[\\/*?:<>|]', '', proveedor_estandar)}.xlsx"
                 
                 st.download_button(
-                    label=f"⬇️ Descargar Reporte Consolidado",
+                    label="⬇️ Descargar Reporte Consolidado",
                     data=output.getvalue(),
                     file_name=nombre_archivo,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
-# ================= DISCLAIMER =================
+# DISCLAIMER
 año_actual = datetime.datetime.now().year
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("---")
