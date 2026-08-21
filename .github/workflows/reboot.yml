@@ -2,7 +2,7 @@ name: Auto-Reboot Streamlit App
 
 on:
   schedule:
-    - cron: '17 */6 * * *'  # Se ejecuta cada 6 horas
+    - cron: '0 12 * * *'  # Corre 1 vez al día
   workflow_dispatch: 
 
 jobs:
