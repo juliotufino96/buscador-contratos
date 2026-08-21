@@ -47,7 +47,6 @@ def ejecutar_etl():
     url = f'https://drive.google.com/drive/folders/{FOLDER_ID}'
     gdown.download_folder(url, output=RUTA_BASE, quiet=True, use_cookies=False)
 
-    # Agregamos 'Descripción del contrato' antes de 'Proveedor o contratista'
     columnas_finales = [
         "Nombre del archivo", "Orden de gobierno", "Clave Ramo",
         "Siglas de la Institución", "Institución", "Número de procedimiento",
@@ -65,12 +64,11 @@ def ejecutar_etl():
     for csv in archivos_csv:
         df_temp = leer_csv_seguro(csv)
         if df_temp is not None:
+            # Únicamente se renombran los campos de Importe y Procedimiento
             df_temp = df_temp.rename(columns={
                 'Importe DRC': 'Importe', 
                 'Número del procedimiento': 'Número de procedimiento', 
-                'Importe del contrato': 'Importe',
-                'Descripción del procedimiento': 'Descripción del contrato',
-                'Descripción': 'Descripción del contrato'
+                'Importe del contrato': 'Importe'
             })
             df_temp['Nombre del archivo'] = os.path.basename(csv)
             df_list.append(df_temp)
