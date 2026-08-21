@@ -1,3 +1,6 @@
+streamlit
 pandas
+duckdb
+pyarrow
 openpyxl
-gdown
+Pillow
