@@ -2,7 +2,7 @@ name: Auto-Reboot Streamlit App
 
 on:
   schedule:
-    - cron: '0 12 * * *'  # Corre 1 vez al día
+    - cron: '17 12 * * *'  # 1 vez al día a las 6:17 AM (Hora MX)
   workflow_dispatch: 
 
 jobs:
@@ -12,9 +12,15 @@ jobs:
       - name: Descargar el repositorio
         uses: actions/checkout@v4
 
+      # 1. Limpia la memoria RAM con el commit vacío
       - name: Hacer un commit vacío y empujar
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          git commit --allow-empty -m "🤖 Auto-reboot: Reinicio diario a las 6am"
+          git commit --allow-empty -m "🤖 Auto-reboot: Reinicio diario a las 6:17am"
           git push
+
+      # 2. Visita la página para que Streamlit NUNCA la mande a dormir
+      - name: Mantener App Despierta (Ping HTTP)
+        run: |
+          curl -s https://buscador-contratos-cjn7itc5chufcdef2nprh5.streamlit.app/ > /dev/null
