@@ -32,6 +32,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add datos_procesados.parquet
-          git commit -m "bot: Actualización automática de datos" || exit 0
+          git add datos_parquet/
+          git commit -m "bot: Actualización particionada de datos" || exit 0
           git push
