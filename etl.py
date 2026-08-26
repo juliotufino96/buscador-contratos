@@ -8,7 +8,6 @@ import gdown
 FOLDER_ID = "1IenfFVfGPxVyEjBaK7M_1JtAKbBGaWlf"
 RUTA_BASE = "Datos_Descargados"
 ruta_parquet = os.path.join(RUTA_BASE, "historico.parquet")
-ARCHIVO_SALIDA = "datos_procesados.parquet"
 
 def normalizar_para_busqueda(texto):
     if pd.isna(texto): return ""
@@ -63,7 +62,8 @@ def ejecutar_etl():
     archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
     for csv in archivos_csv:
         # IGNORAMOS el archivo de exclusiones para que no se mezcle con los contratos
-        if os.path.basename(csv).lower() == "exclusiones_apf.csv":
+        nombre_csv = os.path.basename(csv).lower().replace(" ", "")
+        if nombre_csv.startswith("exclusiones_apf"):
             continue
             
         df_temp = leer_csv_seguro(csv)
@@ -96,25 +96,41 @@ def ejecutar_etl():
         # =========================================================================
         # NUEVO PROCESAMIENTO: CAMBIAR APF A OTRAS BASADO EN EXCLUSIONES_APF.CSV
         # =========================================================================
-        ruta_exclusiones = os.path.join(RUTA_BASE, "Exclusiones_APF.csv")
-        if os.path.exists(ruta_exclusiones):
-            print("Aplicando reglas de exclusión APF...")
+        ruta_exclusiones = None
+        for archivo in os.listdir(RUTA_BASE):
+            nombre_limpio = archivo.lower().strip().replace(" ", "")
+            if nombre_limpio.startswith("exclusiones_apf") and nombre_limpio.endswith(".csv"):
+                ruta_exclusiones = os.path.join(RUTA_BASE, archivo)
+                break
+                
+        if ruta_exclusiones:
+            print(f"Aplicando reglas de exclusión usando el archivo: {os.path.basename(ruta_exclusiones)}")
             df_excl = leer_csv_seguro(ruta_exclusiones)
             
-            if df_excl is not None and 'Institución' in df_excl.columns:
-                # 1. Normalizamos las instituciones del CSV usando la misma función
-                instituciones_excluidas = set(df_excl['Institución'].apply(limpiar_institucion).dropna())
-                
-                # 2. Creamos la condición: Es APF y la institución está en el CSV
-                mascara = (df_maestro['Orden de gobierno'] == 'APF') & (df_maestro['Institución'].isin(instituciones_excluidas))
-                
-                # 3. Aplicamos el cambio y contamos cuántos fueron
-                registros_modificados = mascara.sum()
-                df_maestro.loc[mascara, 'Orden de gobierno'] = 'Otras'
-                
-                print(f"✅ Se actualizaron {registros_modificados:,} registros de 'APF' a 'Otras'.")
-            else:
-                print("⚠️ El archivo Exclusiones_APF.csv no tiene la columna 'Institución'.")
+            if df_excl is not None:
+                # Buscamos la columna "Institución" de forma inteligente (ignora acentos y espacios)
+                columna_inst = None
+                for col in df_excl.columns:
+                    if normalizar_para_busqueda(col) == "institucion":
+                        columna_inst = col
+                        break
+
+                if columna_inst:
+                    # 1. Normalizamos las instituciones del CSV usando la misma función
+                    instituciones_excluidas = set(df_excl[columna_inst].apply(limpiar_institucion).dropna())
+                    
+                    # 2. Creamos la condición: Es APF y la institución está en el CSV
+                    mascara = (df_maestro['Orden de gobierno'] == 'APF') & (df_maestro['Institución'].isin(instituciones_excluidas))
+                    
+                    # 3. Aplicamos el cambio y contamos cuántos fueron
+                    registros_modificados = mascara.sum()
+                    df_maestro.loc[mascara, 'Orden de gobierno'] = 'Otras'
+                    
+                    print(f"✅ Se actualizaron {registros_modificados:,} registros de 'APF' a 'Otras'.")
+                else:
+                    print(f"⚠️ El archivo se encontró, pero no tiene la columna Institución. Columnas encontradas: {list(df_excl.columns)}")
+        else:
+            print("⚠️ No se encontró ningún archivo parecido a Exclusiones_APF.csv en Google Drive.")
         # =========================================================================
 
         CARPETA_SALIDA = "datos_parquet"
