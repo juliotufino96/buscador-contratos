@@ -18,7 +18,8 @@ except FileNotFoundError:
 
 st.set_page_config(page_title="Buscador de Contratos", page_icon=icono, layout="centered")
 
-ARCHIVO_PARQUET = "datos_procesados.parquet"
+CARPETA_PARQUET = "datos_parquet"
+ARCHIVO_PARQUET = f"{CARPETA_PARQUET}/*.parquet"
 
 # ================= FUNCIONES DE LIMPIEZA Y FORMATO =================
 def normalizar_para_busqueda(texto):
@@ -146,8 +147,8 @@ with col_tit:
 
 st.markdown("---")
 
-if not os.path.exists(ARCHIVO_PARQUET):
-    st.error(f"⚠️ No se encontró la base de datos local `{ARCHIVO_PARQUET}`. Espera a que la GitHub Action finalice su primera ejecución.")
+if not os.path.exists(CARPETA_PARQUET):
+    st.error(f"⚠️ No se encontró la base de datos local. Espera a que la GitHub Action finalice.")
     st.stop()
 
 # CONSULTA DE PROVEEDORES
