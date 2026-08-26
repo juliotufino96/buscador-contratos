@@ -62,6 +62,10 @@ def ejecutar_etl():
 
     archivos_csv = sorted(glob.glob(os.path.join(RUTA_BASE, "*.csv")))
     for csv in archivos_csv:
+        # IGNORAMOS el archivo de exclusiones para que no se mezcle con los contratos
+        if os.path.basename(csv).lower() == "exclusiones_apf.csv":
+            continue
+            
         df_temp = leer_csv_seguro(csv)
         if df_temp is not None:
             # Únicamente se renombran los campos de Importe y Procedimiento
@@ -88,6 +92,30 @@ def ejecutar_etl():
         
         # Limpieza de importe
         df_maestro['Importe'] = pd.to_numeric(df_maestro['Importe'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
+
+        # =========================================================================
+        # NUEVO PROCESAMIENTO: CAMBIAR APF A OTRAS BASADO EN EXCLUSIONES_APF.CSV
+        # =========================================================================
+        ruta_exclusiones = os.path.join(RUTA_BASE, "Exclusiones_APF.csv")
+        if os.path.exists(ruta_exclusiones):
+            print("Aplicando reglas de exclusión APF...")
+            df_excl = leer_csv_seguro(ruta_exclusiones)
+            
+            if df_excl is not None and 'Institución' in df_excl.columns:
+                # 1. Normalizamos las instituciones del CSV usando la misma función
+                instituciones_excluidas = set(df_excl['Institución'].apply(limpiar_institucion).dropna())
+                
+                # 2. Creamos la condición: Es APF y la institución está en el CSV
+                mascara = (df_maestro['Orden de gobierno'] == 'APF') & (df_maestro['Institución'].isin(instituciones_excluidas))
+                
+                # 3. Aplicamos el cambio y contamos cuántos fueron
+                registros_modificados = mascara.sum()
+                df_maestro.loc[mascara, 'Orden de gobierno'] = 'Otras'
+                
+                print(f"✅ Se actualizaron {registros_modificados:,} registros de 'APF' a 'Otras'.")
+            else:
+                print("⚠️ El archivo Exclusiones_APF.csv no tiene la columna 'Institución'.")
+        # =========================================================================
 
         print(f"Guardando {len(df_maestro):,} registros en {ARCHIVO_SALIDA}...")
         df_maestro.to_parquet(ARCHIVO_SALIDA, compression="zstd")
