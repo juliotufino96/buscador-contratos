@@ -117,8 +117,16 @@ def ejecutar_etl():
                 print("⚠️ El archivo Exclusiones_APF.csv no tiene la columna 'Institución'.")
         # =========================================================================
 
-        print(f"Guardando {len(df_maestro):,} registros en {ARCHIVO_SALIDA}...")
-        df_maestro.to_parquet(ARCHIVO_SALIDA, compression="zstd")
+        CARPETA_SALIDA = "datos_parquet"
+        os.makedirs(CARPETA_SALIDA, exist_ok=True)
+        
+        print(f"Guardando {len(df_maestro):,} registros particionados por año en la carpeta '{CARPETA_SALIDA}'...")
+        
+        # Agrupamos por año y guardamos un archivo por cada año
+        for anio, df_anio in df_maestro.groupby('Año'):
+            nombre_archivo = f"datos_{anio}.parquet"
+            ruta_guardado = os.path.join(CARPETA_SALIDA, nombre_archivo)
+            df_anio.to_parquet(ruta_guardado, compression="zstd")
         print("¡ETL finalizado con éxito!")
 
 if __name__ == "__main__":
