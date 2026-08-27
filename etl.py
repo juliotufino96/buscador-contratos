@@ -124,9 +124,9 @@ def ejecutar_etl():
                     
                     # 3. Aplicamos el cambio y contamos cuántos fueron
                     registros_modificados = mascara.sum()
-                    df_maestro.loc[mascara, 'Orden de gobierno'] = 'Otras'
+                    df_maestro.loc[mascara, 'Orden de gobierno'] = 'AUTÓNOMOS'
                     
-                    print(f"✅ Se actualizaron {registros_modificados:,} registros de 'APF' a 'Otras'.")
+                    print(f"✅ Se actualizaron {registros_modificados:,} registros de 'APF' a 'AUTÓNOMOS'.")
                 else:
                     print(f"⚠️ El archivo se encontró, pero no tiene la columna Institución. Columnas encontradas: {list(df_excl.columns)}")
         else:
